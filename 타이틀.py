@@ -13,8 +13,28 @@ with st.container(border=True):
     st.divider()
 
     if not st.user.is_logged_in:
+        col1, col2 = st.columns(2, border=True)
+        with col1:
+            st.subheader("캐릭터 관리")
+            st.write("이미 만들어진 캐릭터들을 확인하고, 새로운 캐릭터를 만들어보세요!")
+        with col2:
+            st.subheader("채팅 관리")
+            st.write("캐릭터들과의 채팅을 시작하거나 관리해보세요!")
+
         if st.button("구글로 로그인"):
             st.login()
     else:
+        col1, col2 = st.columns(2, border=True)
+        with col1:
+            st.subheader("캐릭터 관리")
+            st.write("이미 만들어진 캐릭터들을 확인하고, 새로운 캐릭터를 만들어보세요!")
+            if st.button("캐릭터 관리 페이지로 이동", use_container_width=True):
+                st.switch_page("캐릭터_관리.py")
+        with col2:
+            st.subheader("채팅 관리")
+            st.write("캐릭터들과의 채팅을 시작하거나 관리해보세요!")
+            if st.button("채팅 관리 페이지로 이동", use_container_width=True):
+                st.switch_page("채팅_관리.py")
+
         if st.button("로그아웃"):
             st.logout()
