@@ -70,3 +70,6 @@ st.button("➕ 캐릭터 추가", on_click=add_character, use_container_width=Tr
 
 with st.container(border=True):
     st.write("이 부분에 캐릭터들 정보 추가 예정")
+
+    with st.expander("캐릭터 이름"):
+        st.write("캐릭터 특성")
