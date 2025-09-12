@@ -59,3 +59,6 @@ MBTI: {st.session_state.get("주의초점")}{st.session_state.get("인식기능"
     st.caption("추가된 캐릭터는 삭제가 불가능하며, 모든 사용자가 확인 및 대화할 수 있습니다.")
 
 st.button("➕ 캐릭터 추가", on_click=add_character, use_container_width=True)
+
+with st.container(border=True):
+    st.write("이 부분에 캐릭터들 정보 추가 예정")
