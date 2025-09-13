@@ -93,7 +93,19 @@ def add_character():
 st.button("➕ 캐릭터 추가", on_click=add_character, use_container_width=True)
 
 with st.container(border=True):
-    st.write("이 부분에 캐릭터들 정보 추가 예정")
+    status = st.status("캐릭터 정보를 불러오는 중...")
+    box = st.container()
 
-    with st.expander("캐릭터 이름"):
-        st.write("캐릭터 특성")
+    try:
+        count = 0
+        for count, snap in enumerate(db.collection("characters").stream(), start=1):
+            with box.expander(snap.id):
+                st.write(f"성별: {snap.get('gender')}")
+                st.write(f"MBTI: {snap.get('mbti')}")
+                st.write(f"대화스타일: {snap.get('conversation_style')}")
+                st.write(f"기타: {snap.get('etc')}")
+            status.update(label=f"{count}개 로드됨…")
+        status.update(label=f"완료 — 총 {count}개", state="complete")
+    except Exception as e:
+        status.update(label="오류 발생", state="error")
+        st.error(e)
