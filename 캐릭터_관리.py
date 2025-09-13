@@ -16,6 +16,10 @@ db = get_firestore()
 
 st.title("캐릭터 관리")
 
+def name_unique_check(name):
+    names = [ref.id for ref in db.collection("characters").list_documents()]
+    return not name in names
+
 @st.dialog("캐릭터 추가")
 def add_character():
     def reset_input():
@@ -26,12 +30,21 @@ def add_character():
         st.session_state["판단기능"] = "T"
         st.session_state["생활양식"] = "J"
         st.session_state["conversation_style"] = "적음"
+        st.session_state["etc"] = ""
 
     def save_character():
-        print(f"""이름: {st.session_state.get("name")}
-성별: {st.session_state.get("gender")}
-MBTI: {st.session_state.get("주의초점")}{st.session_state.get("인식기능")}{st.session_state.get("판단기능")}{st.session_state.get("생활양식")}
-대화스타일: {st.session_state.get("conversation_style")}""")
+#         print(f"""이름: {st.session_state.get("name")}
+# 성별: {st.session_state.get("gender")}
+# MBTI: {st.session_state.get("주의초점")}{st.session_state.get("인식기능")}{st.session_state.get("판단기능")}{st.session_state.get("생활양식")}
+# 대화스타일: {st.session_state.get("conversation_style")}
+# 기타 정보: {st.session_state.get("etc")}""")
+
+        db.collection("characters").document(st.session_state.get("name")).set({
+            "gender": st.session_state.get("gender"),
+            "mbti": f'{st.session_state.get("주의초점")}{st.session_state.get("인식기능")}{st.session_state.get("판단기능")}{st.session_state.get("생활양식")}',
+            "conversation_style": st.session_state.get("conversation_style"),
+            "etc": st.session_state.get("etc")
+        })
 
     st.subheader("캐릭터의 기본 정보")
     name = st.text_input("이름:red[*]: ", key="name")
@@ -62,11 +75,19 @@ MBTI: {st.session_state.get("주의초점")}{st.session_state.get("인식기능"
         key="conversation_style"
     )
 
+    st.subheader("기타")
+    st.text_area("기타 성격", placeholder="기타 정보를 입력하세요.", key="etc")
+
     col1, col2 = st.columns(2)
     with col1:
         st.button("리셋", use_container_width=True, on_click=reset_input)
     with col2:
-        st.button("저장", use_container_width=True, on_click=save_character, disabled=st.session_state.get("name")=="")
+        st.button("저장", use_container_width=True, on_click=save_character, disabled=st.session_state.get("name")=="" or not name_unique_check(st.session_state.get("name")))
+    if st.session_state.get("name") == "":
+        st.error("이름을 입력하세요!")
+    else:
+        if not name_unique_check(st.session_state.get("name")):
+            st.error("이미 존재하는 이름입니다!")
     st.caption("추가된 캐릭터는 삭제가 불가능하며, 모든 사용자가 확인 및 대화할 수 있습니다.")
 
 st.button("➕ 캐릭터 추가", on_click=add_character, use_container_width=True)
