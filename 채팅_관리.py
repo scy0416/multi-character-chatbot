@@ -1,4 +1,5 @@
 import streamlit as st
+from app import get_firestore
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -10,6 +11,8 @@ with col1:
 with col3:
     if st.button("캐릭터 관리 페이지로 가기"):
         st.switch_page("캐릭터_관리.py")
+
+db = get_firestore()
 
 st.title("채팅 관리")
 
