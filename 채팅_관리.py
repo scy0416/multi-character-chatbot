@@ -1,3 +1,5 @@
+import uuid
+
 import streamlit as st
 from app import get_firestore
 
@@ -14,31 +16,46 @@ with col3:
 
 db = get_firestore()
 
+selected = []
+
 st.title("채팅 관리")
 
 @st.dialog("새 채팅 시작")
-def start_new_chat():
-    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-    with col1:
-        st.text("검색")
-    with col2:
-        q = st.text_input("", label_visibility="collapsed")
-    with col3:
-        st.button("", icon=":material/search:")
+def new_chat_character_select():
+    # 검색은 일단 보류
+    # col1, col2 = st.columns([0.8, 0.2])
+    # with col1:
+    #     q = st.text_input("검색", label_visibility="collapsed", icon=":material/search:")
+    # with col2:
+    #     st.button("검색", use_container_width=True)
 
     st.subheader("캐릭터 선택")
 
+    with st.spinner("불러오는 중..."):
+        snaps = db.collection("characters").get()
+
     with st.container(border=True):
-        col1, col2 = st.columns([0.1, 0.9])
-        with col1:
-            st.checkbox("")
-        with col2:
-            with st.expander("캐릭터 이름"):
-                st.write("캐릭터 특성")
+        for snap in snaps:
+            col1, col2 = st.columns([0.1, 0.9])
+            with col1:
+                st.checkbox("선택", key=f"newchat:{snap.id}", label_visibility="collapsed")
+            with col2:
+                with st.expander(snap.id):
+                    st.write(f"성별: {snap.get('gender')}")
+                    st.write(f"MBTI: {snap.get('mbti')}")
+                    st.write(f"대화스타일: {snap.get('conversation_style')}")
+                    st.write(f"기타: {snap.get('etc')}")
 
-    st.button("채팅 시작", use_container_width=True)
+    global selected
+    selected = [snap.id for snap in snaps if st.session_state.get(f"newchat:{snap.id}")]
+    st.button("채팅 시작", use_container_width=True, on_click=new_chat_start, disabled=len(selected)<=0)
+    if len(selected) <= 0:
+        st.error("캐릭터를 선택하세요!")
 
-st.button("새 채팅 시작", on_click=start_new_chat, use_container_width=True)
+def new_chat_start():
+    db.collection("chats").document(st.user.sub).collection(str(uuid.uuid4())).document("info").set({"characters": selected})
+
+st.button("새 채팅 시작", on_click=new_chat_character_select, use_container_width=True)
 
 st.subheader("진행 중인 채팅")
 with st.container(border=True):
