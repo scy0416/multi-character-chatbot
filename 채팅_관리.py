@@ -57,12 +57,21 @@ def new_chat_start():
 
 st.button("새 채팅 시작", on_click=new_chat_character_select, use_container_width=True)
 
-st.subheader("진행 중인 채팅")
+with st.spinner("불러오는 중..."):
+    cols = db.collection("chats").document(st.user.sub).collections()
+
 with st.container(border=True):
-    col1, col2, col3 = st.columns([0.65, 0.2, 0.15])
-    with col1:
-        st.write("캐릭터0, 캐릭터1, 캐릭터2, ... + n")
-    with col2:
-        st.button("채팅 시작", use_container_width=True)
-    with col3:
-        st.button("삭제", use_container_width=True, type="primary")
+    for col in cols:
+        characters = col.document("info").get().get("characters")
+        col1, col2, col3 = st.columns([0.65, 0.2, 0.15])
+        with col1:
+            if len(characters) > 3:
+                st.write(f"{characters[0]}, {characters[1]}, {characters[2]}, ... +{len(characters)-3}")
+            else:
+                st.write(", ".join(characters))
+        with col2:
+            st.button("채팅 시작", use_container_width=True, key=f"{col.id}1")
+        with col3:
+            st.button("삭제", use_container_width=True, type="primary", key=f"{col.id}2")
+
+        st.divider()
