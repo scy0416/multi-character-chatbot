@@ -18,6 +18,8 @@ db = get_firestore()
 
 selected = []
 
+st.session_state.chat_id = None
+
 st.title("채팅 관리")
 
 @st.dialog("새 채팅 시작")
@@ -60,6 +62,27 @@ st.button("새 채팅 시작", on_click=new_chat_character_select, use_container
 with st.spinner("불러오는 중..."):
     cols = db.collection("chats").document(st.user.sub).collections()
 
+def delete_collection_recursive(coll_ref, batch_size: int = 500):
+    while True:
+        docs = list(coll_ref.limit(batch_size).stream())
+        if not docs:
+            break
+
+        for snap in docs:
+            for sub in snap.reference.collections():
+                delete_collection_recursive(sub, batch_size)
+
+        batch = db.batch()
+        for snap in docs:
+            batch.delete(snap.reference)
+        batch.commit()
+
+def del_chat(chat_id):
+    col_ref = db.collection("chats").document(st.user.sub).collection(chat_id)
+    with st.spinner(f"채팅({chat_id}) 삭제 중..."):
+        delete_collection_recursive(col_ref, batch_size=300)
+    st.toast("삭제 완료 ✅")
+
 with st.container(border=True):
     for col in cols:
         characters = col.document("info").get().get("characters")
@@ -70,8 +93,10 @@ with st.container(border=True):
             else:
                 st.write(", ".join(characters))
         with col2:
-            st.button("채팅 시작", use_container_width=True, key=f"{col.id}1")
+            if st.button("채팅 시작", use_container_width=True, key=f"{col.id}1"):
+                st.session_state.chat_id = col.id
+                st.switch_page("챗봇.py")
         with col3:
-            st.button("삭제", use_container_width=True, type="primary", key=f"{col.id}2")
+            st.button("삭제", use_container_width=True, type="primary", key=f"{col.id}2", on_click=del_chat, kwargs={"chat_id": col.id})
 
         st.divider()
