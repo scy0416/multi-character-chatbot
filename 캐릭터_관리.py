@@ -14,6 +14,8 @@ with col3:
 
 db = get_firestore()
 
+st.session_state.chat_id = None
+
 st.title("캐릭터 관리")
 
 def name_unique_check(name):

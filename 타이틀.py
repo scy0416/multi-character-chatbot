@@ -1,5 +1,7 @@
 import streamlit as st
 
+st.session_state.chat_id = None
+
 with st.container(border=True):
     st.title("멀티 캐릭터 챗봇")
 
