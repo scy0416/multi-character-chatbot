@@ -16,9 +16,8 @@ with col3:
 
 db = get_firestore()
 
-selected = []
-
 st.session_state.chat_id = None
+st.session_state.chat_start = False
 
 st.title("채팅 관리")
 
@@ -48,14 +47,23 @@ def new_chat_character_select():
                     st.write(f"대화스타일: {snap.get('conversation_style')}")
                     st.write(f"기타: {snap.get('etc')}")
 
-    global selected
     selected = [snap.id for snap in snaps if st.session_state.get(f"newchat:{snap.id}")]
-    st.button("채팅 시작", use_container_width=True, on_click=new_chat_start, disabled=len(selected)<=0)
+    if st.button("채팅 시작", use_container_width=True, disabled=len(selected)<=0):
+        new_chat_id = str(uuid.uuid4())
+
+        characters_info = {}
+
+        for character in selected:
+            characters_info[character] = db.collection("characters").document(character).get().to_dict()
+            characters_info[character]["lore"] = ""
+
+        db.collection("chats").document(st.user.sub).collection(new_chat_id).document("info").set({"characters": selected})
+        db.collection("chats").document(st.user.sub).collection(new_chat_id).document("participants").set(characters_info)
+
+        st.session_state.chat_id = new_chat_id
+        st.switch_page("챗봇.py")
     if len(selected) <= 0:
         st.error("캐릭터를 선택하세요!")
-
-def new_chat_start():
-    db.collection("chats").document(st.user.sub).collection(str(uuid.uuid4())).document("info").set({"characters": selected})
 
 st.button("새 채팅 시작", on_click=new_chat_character_select, use_container_width=True)
 
