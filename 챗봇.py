@@ -1,4 +1,19 @@
+from typing import List, TypedDict, Dict
+from pydantic import BaseModel, Field
+import re
+
 import streamlit as st
+from app import get_firestore
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, START
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, MessagesPlaceholder
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.types import Command, interrupt
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.runtime import Runtime
+from langgraph_checkpoint_firestore import FirestoreSaver
+from utils_auth import activate_adc_from_secrets
+from langchain_openai import ChatOpenAI
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -6,4 +21,226 @@ if not st.user.is_logged_in:
 if not "chat_id" in st.session_state or st.session_state.chat_id is None:
     st.switch_page("타이틀.py")
 
-st.write(st.session_state.chat_id)
+db = get_firestore()
+llm = ChatOpenAI(model="gpt-4.1-2025-04-14", streaming=True)
+
+class State(TypedDict):
+    history: List
+    characters: Dict
+    speaker: str
+    #await_human: bool
+
+class Ctx(TypedDict):
+    speak_desire: Dict
+
+def 사용자_발화(state: State, runtime: Runtime[Ctx]):
+    # if not state["await_human"]:
+    #     print("대기 시작")
+    #     return {"await_human": True}
+    # else:
+    #     print("입력 처리")
+    #     payload = interrupt({})
+    #     user_text = payload["text"]
+    #     state["history"].append(HumanMessage(content=user_text))
+    #     state["await_human"] = False
+    #     return state
+    # pass
+
+    # print("입력 대기")
+    # payload = interrupt({})
+    # user_text = payload["text"]
+    # print("입력 처리")
+    # state["history"].append(HumanMessage(content=user_text))
+
+    # if state["await_human"]:
+    #     print("입력 대기")
+    # payload = interrupt({})
+    # if not state["await_human"]:
+    #     print("입력 처리")
+    #     user_text = payload["text"]
+    #     state["history"].append(HumanMessage(content=user_text))
+
+    #print("노드 시작")
+    payload = interrupt({})
+    #print("입력 처리")
+    user_text = payload["text"]
+    state["history"].append(HumanMessage(content=user_text))
+    return state
+
+def 테스트_노드(state: State, runtime: Runtime[Ctx]):
+    print(state["history"])
+
+class utterance_character(BaseModel):
+    utterance_character: str = Field(description="가장 발화를 하고자 하는 캐릭터입니다.")
+def 리드_욕구_확인(state: State, runtime: Runtime[Ctx]):
+    system_prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template("""당신은 멀티 캐릭터 챗봇의 캐릭터들의 리드 대화욕구를 측정해서 발화를 할 캐릭터를 정하는 조정자입니다.
+당신에게는 지금까지의 대화내역과 캐릭터들에 대한 정보가 전달될 것이며, 그를 토대로 가장 발화를 일으킬만한 캐릭터를 딱 한 명 정하세요.
+### 캐릭터 정보
+{characters}
+### 대화 내역"""),
+        MessagesPlaceholder("history")
+    ])
+
+    system_prompt = system_prompt_template.invoke({"characters": str(state["characters"]), "history": state["history"]})
+    state["speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
+    pass
+
+def 리드_생성(state: State, runtime: Runtime[Ctx]):
+    system_prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template("""당신은 멀티 캐릭터 챗봇의 캐릭터 대화 생성자입니다.
+당신에게는 지금까지의 대화 내역과 발화를 하고자 하는 캐릭터의 정보가 전달됩니다.
+
+아래의 형식으로 출력하세요. 단, 캐릭터의 대화 스타일에 따라서 최대 5회까지 나눠서 발언할 수 있습니다.
+
+<DIALOGUE speaker="이름">
+(대사 텍스트)
+</DIALOGUE>
+
+### 대화 내역"""),
+        MessagesPlaceholder("history"),
+        SystemMessagePromptTemplate.from_template("""### 발화자 캐릭터
+{character}""")
+    ])
+
+    system_prompt = system_prompt_template.invoke({"history": state["history"], "character": str(state["characters"][state["speaker"]])})
+
+    buffer = ""
+    current_role = None
+    speaker = None
+    for chunk in llm.stream(system_prompt):
+        if not chunk.content:
+            continue
+
+        token = chunk.content
+        buffer += token
+
+        # 마커 시작 감지
+        if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+            tag_match = re.search(f"<DIALOGUE([^>]*)>", buffer)
+            if tag_match:
+                attrs = tag_match.group(1)
+                match = re.search(f'speaker="([^"]+)"', attrs)
+                speaker = match.group(1) if match else "캐릭터"
+                current_role = f"dialogue:{speaker}"
+                buffer = buffer.split(">", 1)[-1]
+        # 마커 종료 감지
+        if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+            buffer = buffer.replace("</DIALOGUE>", "")
+            final_dialogue = f"{speaker}: {buffer}"
+            buffer = ""
+            current_role = None
+            speaker = None
+            state["history"].append(AIMessage(content=final_dialogue))
+    pass
+
+def 어사이드_욕구_확인(state: State, runtime: Runtime[Ctx]):
+    pass
+
+def 어사이드_생성(state: State, runtime: Runtime[Ctx]):
+    pass
+
+def 핸드오프_욕구_확인(state: State, runtime: Runtime[Ctx]):
+    pass
+
+graph_builder = StateGraph(State, context_schema=Ctx)
+
+graph_builder.add_node("사용자 발화", 사용자_발화)
+#graph_builder.add_node("테스트 노드", 테스트_노드)
+graph_builder.add_node("리드 욕구 확인", 리드_욕구_확인)
+graph_builder.add_node("")
+
+graph_builder.add_edge(START, "사용자 발화")
+graph_builder.add_edge("사용자 발화", "테스트 노드")
+
+#graph = graph_builder.compile(checkpointer=InMemorySaver())
+if "adc_key_path" not in st.session_state:
+    st.session_state["adc_key_path"] = activate_adc_from_secrets()
+memory = FirestoreSaver(project_id="multi-character-chat", checkpoints_collection="checkpoints", writes_collection="checkpoints_writes")
+graph = graph_builder.compile(checkpointer=memory)
+
+#st.write(st.session_state.chat_id)
+
+# st.write(db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("info").get().to_dict())
+# st.write(db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("participants").get().to_dict())
+
+with st.spinner("불러오는 중..."):
+    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("info").get().to_dict()
+    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("participants").get().to_dict()
+
+# st.write(chat_info)
+# st.write(chat_participants)
+
+config = {"configurable": {"thread_id": st.session_state.chat_id}}
+
+tup = memory.get_tuple(config)
+exists_latest = (tup is not None)
+
+if exists_latest:
+    #print("체크 포인트가 존재함")
+    pass
+else:
+    #print("체크 포인트가 존재하지 않음")
+    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("info").get().to_dict()
+    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("participants").get().to_dict()
+
+    graph.invoke(State(history=[], characters=chat_participants, speaker=""), config)
+
+config, checkpoint, metadata, parent_config, pending_writes = memory.get_tuple(config)
+#print(checkpoint["channel_values"])
+#print("__interrupt__" in pending_writes[0])
+
+message_box = st.container(border=True)
+
+if "__interrupt__" in pending_writes[0]:
+    prompt = st.chat_input("대화를 입력하세요.")
+    if prompt:
+        with message_box:
+            with st.chat_message("user"):
+                st.write(prompt)
+        cmd = Command(resume={"text": prompt})
+
+        buffer = ""
+        current_role = None
+        speaker = None
+        container = None
+        placeholder = None
+        for event in graph.stream(cmd, config, stream_mode="messages"):
+            node_name = event[1].get("langgraph_node")
+
+            match node_name:
+                case "리드 생성":
+                    if not event[0].content:
+                        continue
+
+                    buffer += event[0].content
+
+                    if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+                        tag_match = re.search(r"<DIALOGUE([^>]*)>", buffer)
+                        if tag_match:
+                            attrs = tag_match.group(1)
+                            match = re.search(f'speaker="([^"]+)"', attrs)
+                            speaker = match.group(1) if match else "캐릭터"
+                            current_role = f"dialogue:{speaker}"
+                            buffer = buffer.split(">", 1)[-1]
+                            container = message_box.chat_message()
+                            placeholder = container.empty()
+                    if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
+                        placeholder.write(f"{speaker}: {buffer}")
+                    if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+                        buffer = buffer.replace("</DIALOGUE>", "")
+                        placeholder.write(f"{speaker}: {buffer}")
+                        buffer = ""
+                        current_role = None
+                        speaker = None
+else:
+    st.chat_input("대화를 입력하세요.", disabled=True)
+
+# for v in graph.stream(State(history=[], characters=chat_participants, speaker=""), config, stream_mode="values"):
+#     pass
+#
+# if prompt := st.chat_input("대화를 입력하세요."):
+#     cmd = Command(resume={"text": prompt})
+#
+#     for v in graph.stream(cmd, config, stream_mode="values"):
+#         pass
