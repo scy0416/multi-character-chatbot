@@ -84,6 +84,7 @@ def 리드_욕구_확인(state: State, runtime: Runtime[Ctx]):
 
     system_prompt = system_prompt_template.invoke({"characters": str(state["characters"]), "history": state["history"]})
     state["speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
+    return state
     pass
 
 def 리드_생성(state: State, runtime: Runtime[Ctx]):
@@ -132,6 +133,7 @@ def 리드_생성(state: State, runtime: Runtime[Ctx]):
             current_role = None
             speaker = None
             state["history"].append(AIMessage(content=final_dialogue))
+    return state
     pass
 
 def 어사이드_욕구_확인(state: State, runtime: Runtime[Ctx]):
@@ -148,10 +150,13 @@ graph_builder = StateGraph(State, context_schema=Ctx)
 graph_builder.add_node("사용자 발화", 사용자_발화)
 #graph_builder.add_node("테스트 노드", 테스트_노드)
 graph_builder.add_node("리드 욕구 확인", 리드_욕구_확인)
-graph_builder.add_node("")
+graph_builder.add_node("리드 생성", 리드_생성)
 
 graph_builder.add_edge(START, "사용자 발화")
-graph_builder.add_edge("사용자 발화", "테스트 노드")
+#graph_builder.add_edge("사용자 발화", "테스트 노드")
+graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
+graph_builder.add_edge("리드 욕구 확인", "리드 생성")
+graph_builder.add_edge("리드 생성", "사용자 발화")
 
 #graph = graph_builder.compile(checkpointer=InMemorySaver())
 if "adc_key_path" not in st.session_state:
@@ -223,7 +228,7 @@ if "__interrupt__" in pending_writes[0]:
                             speaker = match.group(1) if match else "캐릭터"
                             current_role = f"dialogue:{speaker}"
                             buffer = buffer.split(">", 1)[-1]
-                            container = message_box.chat_message()
+                            container = message_box.chat_message(speaker)
                             placeholder = container.empty()
                     if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
                         placeholder.write(f"{speaker}: {buffer}")
