@@ -15,6 +15,7 @@ from langgraph_checkpoint_firestore import FirestoreSaver
 from utils_auth import activate_adc_from_secrets
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.redis import RedisSaver
+from redis import Redis
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -159,13 +160,24 @@ graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
 graph_builder.add_edge("리드 욕구 확인", "리드 생성")
 graph_builder.add_edge("리드 생성", "사용자 발화")
 
-graph = graph_builder.compile(checkpointer=InMemorySaver())
-if "adc_key_path" not in st.session_state:
-    st.session_state["adc_key_path"] = activate_adc_from_secrets()
-memory = FirestoreSaver(project_id="multi-character-chat", checkpoints_collection="checkpoints", writes_collection="checkpoints_writes")
-graph = graph_builder.compile(checkpointer=memory)
-# saver = RedisSaver.from_conn_string(st.secrets['redis']['REDIS_ENDPOINT'])
-# graph = graph_builder.compile(checkpointer=saver)
+# graph = graph_builder.compile(checkpointer=InMemorySaver())
+# if "adc_key_path" not in st.session_state:
+#     st.session_state["adc_key_path"] = activate_adc_from_secrets()
+# memory = FirestoreSaver(project_id="multi-character-chat", checkpoints_collection="checkpoints", writes_collection="checkpoints_writes")
+# graph = graph_builder.compile(checkpointer=memory)
+#saver = RedisSaver.from_conn_string(st.secrets['redis']['REDIS_ENDPOINT'])
+client = Redis(
+    host=st.secrets["redis"]["host"],
+    port=st.secrets["redis"]["port"],
+    password=st.secrets["redis"]["password"],
+    ssl=False,
+    ssl_cert_reqs="required",
+    decode_responses=False
+)
+saver=RedisSaver(redis_client=client)
+saver.setup()
+graph = graph_builder.compile(checkpointer=saver)
+
 
 #st.write(st.session_state.chat_id)
 
@@ -181,7 +193,8 @@ with st.spinner("불러오는 중..."):
 
 config = {"configurable": {"thread_id": st.session_state.chat_id}}
 
-tup = memory.get_tuple(config)
+#tup = memory.get_tuple(config)
+tup = saver.get_tuple(config)
 exists_latest = (tup is not None)
 
 if exists_latest:
@@ -194,13 +207,26 @@ else:
 
     graph.invoke(State(history=[], characters=chat_participants, speaker=""), config)
 
-config, checkpoint, metadata, parent_config, pending_writes = memory.get_tuple(config)
+config, checkpoint, metadata, parent_config, pending_writes = saver.get_tuple(config)
+
+#print(config)
+#print(checkpoint['channel_values']['history'])
+#print(pending_writes)
+
 #print(checkpoint["channel_values"])
 #print("__interrupt__" in pending_writes[0])
 
 message_box = st.container(border=True)
 
-if "__interrupt__" in pending_writes[0]:
+for message in checkpoint['channel_values']['history']:
+    if isinstance(message, AIMessage):
+        with message_box.chat_message("ai"):
+            st.write(message.content)
+    else:
+        with message_box.chat_message("human"):
+            st.write(message.content)
+
+if pending_writes and any("__interrupt__" in w for w in pending_writes):
     prompt = st.chat_input("대화를 입력하세요.")
     if prompt:
         with message_box:
