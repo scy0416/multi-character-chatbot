@@ -36,35 +36,7 @@ class Ctx(TypedDict):
     speak_desire: Dict
 
 def 사용자_발화(state: State, runtime: Runtime[Ctx]):
-    # if not state["await_human"]:
-    #     print("대기 시작")
-    #     return {"await_human": True}
-    # else:
-    #     print("입력 처리")
-    #     payload = interrupt({})
-    #     user_text = payload["text"]
-    #     state["history"].append(HumanMessage(content=user_text))
-    #     state["await_human"] = False
-    #     return state
-    # pass
-
-    # print("입력 대기")
-    # payload = interrupt({})
-    # user_text = payload["text"]
-    # print("입력 처리")
-    # state["history"].append(HumanMessage(content=user_text))
-
-    # if state["await_human"]:
-    #     print("입력 대기")
-    # payload = interrupt({})
-    # if not state["await_human"]:
-    #     print("입력 처리")
-    #     user_text = payload["text"]
-    #     state["history"].append(HumanMessage(content=user_text))
-
-    #print("노드 시작")
     payload = interrupt({})
-    #print("입력 처리")
     user_text = payload["text"]
     state["history"].append(HumanMessage(content=user_text))
     return state
@@ -96,17 +68,18 @@ def 리드_생성(state: State, runtime: Runtime[Ctx]):
 
 아래의 형식으로 출력하세요. 단, 캐릭터의 대화 스타일에 따라서 최대 5회까지 나눠서 발언할 수 있습니다.
 
-<DIALOGUE speaker="이름">
+<DIALOGUE speaker="{current_speaker}">
 (대사 텍스트)
 </DIALOGUE>
 
 ### 대화 내역"""),
         MessagesPlaceholder("history"),
         SystemMessagePromptTemplate.from_template("""### 발화자 캐릭터
+이름: {current_speaker}
 {character}""")
     ])
 
-    system_prompt = system_prompt_template.invoke({"history": state["history"], "character": str(state["characters"][state["speaker"]])})
+    system_prompt = system_prompt_template.invoke({"current_speaker": state["speaker"], "history": state["history"], "character": str(state["characters"][state["speaker"]])})
 
     buffer = ""
     current_role = None
@@ -177,7 +150,7 @@ client = Redis(
 saver=RedisSaver(redis_client=client)
 saver.setup()
 graph = graph_builder.compile(checkpointer=saver)
-
+graph.get_graph().draw_mermaid_png(output_file_path="graph.png")
 
 #st.write(st.session_state.chat_id)
 
@@ -208,6 +181,7 @@ else:
     graph.invoke(State(history=[], characters=chat_participants, speaker=""), config)
 
 config, checkpoint, metadata, parent_config, pending_writes = saver.get_tuple(config)
+#print(checkpoint)
 
 #print(config)
 #print(checkpoint['channel_values']['history'])
@@ -269,6 +243,9 @@ if pending_writes and any("__interrupt__" in w for w in pending_writes):
                         speaker = None
 else:
     st.chat_input("대화를 입력하세요.", disabled=True)
+    graph.invoke(None, config)
+    st.rerun()
+
 
 # for v in graph.stream(State(history=[], characters=chat_participants, speaker=""), config, stream_mode="values"):
 #     pass
