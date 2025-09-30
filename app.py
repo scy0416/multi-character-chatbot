@@ -1,6 +1,9 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
+from dotenv import load_dotenv
+
+load_dotenv()
 
 @st.cache_resource
 def get_firestore():
