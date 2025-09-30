@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 from langgraph_checkpoint_firestore import FirestoreSaver
 from utils_auth import activate_adc_from_secrets
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.redis import RedisSaver
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -158,11 +159,13 @@ graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
 graph_builder.add_edge("리드 욕구 확인", "리드 생성")
 graph_builder.add_edge("리드 생성", "사용자 발화")
 
-#graph = graph_builder.compile(checkpointer=InMemorySaver())
+graph = graph_builder.compile(checkpointer=InMemorySaver())
 if "adc_key_path" not in st.session_state:
     st.session_state["adc_key_path"] = activate_adc_from_secrets()
 memory = FirestoreSaver(project_id="multi-character-chat", checkpoints_collection="checkpoints", writes_collection="checkpoints_writes")
 graph = graph_builder.compile(checkpointer=memory)
+# saver = RedisSaver.from_conn_string(st.secrets['redis']['REDIS_ENDPOINT'])
+# graph = graph_builder.compile(checkpointer=saver)
 
 #st.write(st.session_state.chat_id)
 
