@@ -112,13 +112,95 @@ def 리드_생성(state: State, runtime: Runtime[Ctx]):
     pass
 
 def 어사이드_욕구_확인(state: State, runtime: Runtime[Ctx]):
+    system_prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template("""당신은 멀티 캐릭터 챗봇의 캐릭터들의 어사이드 대화욕구를 측정해서 리드에 대한 어사이드 발화를 할 캐릭터를 정하는 조정자입니다.
+어사이드는 리드 대화에 대한 끼어들기 대화로 끼어드는 캐릭터가 존재할 수도, 존재하지 않을 수도 있습니다.
+당신에게는 지금까지의 대화내역과 리드 발화를 진행한 캐릭터를 제외한 캐릭터들에 대한 정보가 전달될 것이며, 그를 토대로 가장 발화를 일으킬만한 캐릭터를 정하세요.
+끼어들 캐릭터가 없다면 빈 문자열을 반환하세요.
+### 캐릭터 정보
+{characters}
+### 대화 내역"""),
+        MessagesPlaceholder("history")
+    ])
+
+    system_prompt = system_prompt_template.invoke({"characters": str(state["characters"]), "history": state["history"]})
+    state["speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
+    return state
     pass
 
 def 어사이드_생성(state: State, runtime: Runtime[Ctx]):
+    system_prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template("""당신은 멀티 캐릭터 챗봇의 캐릭터 대화 생성자입니다.
+    당신에게는 지금까지의 대화 내역과 발화를 하고자 하는 캐릭터의 정보가 전달됩니다.
+
+    아래의 형식으로 출력하세요. 단, 캐릭터의 대화 스타일에 따라서 최대 5회까지 나눠서 발언할 수 있습니다.
+
+    <DIALOGUE speaker="{current_speaker}">
+    (대사 텍스트)
+    </DIALOGUE>
+
+    ### 대화 내역"""),
+        MessagesPlaceholder("history"),
+        SystemMessagePromptTemplate.from_template("""### 발화자 캐릭터
+    이름: {current_speaker}
+    {character}""")
+    ])
+
+    system_prompt = system_prompt_template.invoke({"current_speaker": state["speaker"], "history": state["history"],
+                                                   "character": str(state["characters"][state["speaker"]])})
+
+    buffer = ""
+    current_role = None
+    speaker = None
+    for chunk in llm.stream(system_prompt):
+        if not chunk.content:
+            continue
+
+        token = chunk.content
+        buffer += token
+
+        # 마커 시작 감지
+        if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+            tag_match = re.search(f"<DIALOGUE([^>]*)>", buffer)
+            if tag_match:
+                attrs = tag_match.group(1)
+                match = re.search(f'speaker="([^"]+)"', attrs)
+                speaker = match.group(1) if match else "캐릭터"
+                current_role = f"dialogue:{speaker}"
+                buffer = buffer.split(">", 1)[-1]
+        # 마커 종료 감지
+        if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+            buffer = buffer.replace("</DIALOGUE>", "")
+            final_dialogue = f"{speaker}: {buffer}"
+            buffer = ""
+            current_role = None
+            speaker = None
+            state["history"].append(AIMessage(content=final_dialogue))
+    return state
     pass
 
+class handoff(BaseModel):
+    handoff: bool = Field(description="어사이드를 진행한 캐릭터의 핸드오프를 하고자 하는 의지")
 def 핸드오프_욕구_확인(state: State, runtime: Runtime[Ctx]):
-    pass
+    if state["speaker"] == '':
+        return "사용자 발화"
+
+    system_prompt_template = ChatPromptTemplate.from_messages([
+        SystemMessagePromptTemplate.from_template("""당신은 어사이드를 진행한 캐릭터가 핸드오프를 통해서 대화를 리드할지에 대해서 결정하는 조정자입니다.
+핸드오프는 어사이드를 진행한 후에 캐릭터가 대화를 가로채서 진행하는 행위입니다.
+당신에게는 지금까지의 대화내역과 어사이드를 진행한 캐릭터에 대한 정보가 전달될 것이며, 이를 토대로 어사이드를 진행한 캐릭터가 핸드오프를 진행할지에 대해서 정하세요.
+### 어사이드를 진행한 캐릭터 정보
+{character}
+### 대화 내역"""),
+        MessagesPlaceholder("history")
+    ])
+
+    system_prompt = system_prompt_template.invoke({"character": state["speaker"], "history": state["history"]})
+    #state["speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
+    if llm.with_structured_output(handoff).invoke(system_prompt).handoff:
+        return "리드 생성"
+    else:
+        return "어사이드 생성"
 
 graph_builder = StateGraph(State, context_schema=Ctx)
 
@@ -126,12 +208,20 @@ graph_builder.add_node("사용자 발화", 사용자_발화)
 #graph_builder.add_node("테스트 노드", 테스트_노드)
 graph_builder.add_node("리드 욕구 확인", 리드_욕구_확인)
 graph_builder.add_node("리드 생성", 리드_생성)
+graph_builder.add_node("어사이드 욕구 확인", 어사이드_욕구_확인)
+graph_builder.add_node("어사이드 생성", 어사이드_생성)
 
 graph_builder.add_edge(START, "사용자 발화")
 #graph_builder.add_edge("사용자 발화", "테스트 노드")
 graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
 graph_builder.add_edge("리드 욕구 확인", "리드 생성")
-graph_builder.add_edge("리드 생성", "사용자 발화")
+#graph_builder.add_edge("리드 생성", "사용자 발화")
+graph_builder.add_conditional_edges("리드 생성", lambda state, runtime: "어사이드 욕구 확인" if len(state["characters"]) > 1 else "사용자 발화", ["어사이드 욕구 확인", "사용자 발화"])
+#graph_builder.add_conditional_edges("어사이드 욕구 확인", lambda state, runtime: "어사이드 생성" if state["speaker"] else "사용자 발화", ["어사이드 생성", "사용자 발화"])
+#graph_builder.add_edge("어사이드 생성", "사용자 발화")
+#graph_builder.add_conditional_edges("어사이드 생성", 핸드오프_욕구_확인, ["리드 생성", "사용자 발화"])
+graph_builder.add_conditional_edges("어사이드 욕구 확인", 핸드오프_욕구_확인, ["리드 생성", "어사이드 생성", "사용자 발화"])
+graph_builder.add_edge("어사이드 생성", "사용자 발화")
 
 # graph = graph_builder.compile(checkpointer=InMemorySaver())
 # if "adc_key_path" not in st.session_state:
@@ -150,7 +240,8 @@ client = Redis(
 saver=RedisSaver(redis_client=client)
 saver.setup()
 graph = graph_builder.compile(checkpointer=saver)
-graph.get_graph().draw_mermaid_png(output_file_path="graph.png")
+#graph.get_graph().draw_mermaid_png(output_file_path="graph.png")
+print(graph.get_graph().draw_mermaid())
 
 #st.write(st.session_state.chat_id)
 
