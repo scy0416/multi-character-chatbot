@@ -2,6 +2,8 @@ import uuid
 
 import streamlit as st
 from app import get_firestore
+from langgraph.checkpoint.redis import RedisSaver
+from redis import Redis
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -15,6 +17,16 @@ with col3:
         st.switch_page("캐릭터_관리.py")
 
 db = get_firestore()
+
+client = Redis(
+    host=st.secrets["redis"]["host"],
+    port=st.secrets["redis"]["port"],
+    password=st.secrets["redis"]["password"],
+    ssl=False,
+    ssl_cert_reqs="required",
+    decode_responses=False
+)
+saver = RedisSaver(redis_client=client)
 
 st.session_state.chat_id = None
 st.session_state.chat_start = False
@@ -89,6 +101,7 @@ def del_chat(chat_id):
     col_ref = db.collection("chats").document(st.user.sub).collection(chat_id)
     with st.spinner(f"채팅({chat_id}) 삭제 중..."):
         delete_collection_recursive(col_ref, batch_size=300)
+    saver.delete_thread(chat_id)
     st.toast("삭제 완료 ✅")
 
 with st.container(border=True):
