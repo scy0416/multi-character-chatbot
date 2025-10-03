@@ -2,8 +2,10 @@ import uuid
 
 import streamlit as st
 from app import get_firestore
-from langgraph.checkpoint.redis import RedisSaver
-from redis import Redis
+#from langgraph.checkpoint.redis import RedisSaver
+#from redis import Redis
+from langgraph.checkpoint.mongodb import MongoDBSaver
+from pymongo import MongoClient
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -18,15 +20,22 @@ with col3:
 
 db = get_firestore()
 
-client = Redis(
-    host=st.secrets["redis"]["host"],
-    port=st.secrets["redis"]["port"],
-    password=st.secrets["redis"]["password"],
-    ssl=False,
-    ssl_cert_reqs="required",
-    decode_responses=False
+# client = Redis(
+#     host=st.secrets["redis"]["host"],
+#     port=st.secrets["redis"]["port"],
+#     password=st.secrets["redis"]["password"],
+#     ssl=False,
+#     ssl_cert_reqs="required",
+#     decode_responses=False
+# )
+# saver = RedisSaver(redis_client=client)
+client = MongoClient(st.secrets["mongodb"]["MONGODB_URI"], tls=True)
+saver = MongoDBSaver(
+    client,
+    db_name=st.secrets["mongodb"]["DB_NAME"],
+    checkpoint_collection_name="checkpoints",
+    writes_collection_name="checkpoints_writes"
 )
-saver = RedisSaver(redis_client=client)
 
 st.session_state.chat_id = None
 st.session_state.chat_start = False

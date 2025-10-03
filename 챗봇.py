@@ -14,8 +14,10 @@ from langgraph.runtime import Runtime
 from langgraph_checkpoint_firestore import FirestoreSaver
 from utils_auth import activate_adc_from_secrets
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.redis import RedisSaver
-from redis import Redis
+#from langgraph.checkpoint.redis import RedisSaver
+#from redis import Redis
+from pymongo import MongoClient
+from langgraph.checkpoint.mongodb import MongoDBSaver
 
 if not st.user.is_logged_in:
     st.switch_page("타이틀.py")
@@ -229,16 +231,25 @@ graph_builder.add_edge("어사이드 생성", "사용자 발화")
 # memory = FirestoreSaver(project_id="multi-character-chat", checkpoints_collection="checkpoints", writes_collection="checkpoints_writes")
 # graph = graph_builder.compile(checkpointer=memory)
 #saver = RedisSaver.from_conn_string(st.secrets['redis']['REDIS_ENDPOINT'])
-client = Redis(
-    host=st.secrets["redis"]["host"],
-    port=st.secrets["redis"]["port"],
-    password=st.secrets["redis"]["password"],
-    ssl=False,
-    ssl_cert_reqs="required",
-    decode_responses=False
+
+# client = Redis(
+#     host=st.secrets["redis"]["host"],
+#     port=st.secrets["redis"]["port"],
+#     password=st.secrets["redis"]["password"],
+#     ssl=False,
+#     ssl_cert_reqs="required",
+#     decode_responses=False
+# )
+# saver=RedisSaver(redis_client=client)
+client = MongoClient(st.secrets["mongodb"]["MONGODB_URI"], tls=True)
+saver = MongoDBSaver(
+    client,
+    db_name=st.secrets["mongodb"]["DB_NAME"],
+    checkpoint_collection_name="checkpoints",
+    writes_collection_name="checkpoints_writes"
 )
-saver=RedisSaver(redis_client=client)
-saver.setup()
+#saver = MongoDBSaver.from_conn_string(st.secrets["mongodb"]["MONGODB_URI"], st.secrets["mongodb"]["DB_NAME"])
+#saver.setup()
 graph = graph_builder.compile(checkpointer=saver)
 #graph.get_graph().draw_mermaid_png(output_file_path="graph.png")
 print(graph.get_graph().draw_mermaid())
