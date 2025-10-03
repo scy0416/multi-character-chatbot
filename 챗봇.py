@@ -52,6 +52,7 @@ def 리드_욕구_확인(state: State, runtime: Runtime[Ctx]):
     system_prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template("""당신은 멀티 캐릭터 챗봇의 캐릭터들의 리드 대화욕구를 측정해서 발화를 할 캐릭터를 정하는 조정자입니다.
 당신에게는 지금까지의 대화내역과 캐릭터들에 대한 정보가 전달될 것이며, 그를 토대로 가장 발화를 일으킬만한 캐릭터를 딱 한 명 정하세요.
+너무 한 캐릭터만 대화하지 않도록 골고루 말할 수 있게 선택하세요.
 ### 캐릭터 정보
 {characters}
 ### 대화 내역"""),
@@ -125,7 +126,13 @@ def 어사이드_욕구_확인(state: State, runtime: Runtime[Ctx]):
         MessagesPlaceholder("history")
     ])
 
-    system_prompt = system_prompt_template.invoke({"characters": str(state["characters"]), "history": state["history"]})
+    aside_able_characters = ""
+    for c in state["characters"]:
+        if c == state["speaker"]:
+            continue
+        #aside_able_characters += str(state["characters"][c])
+        aside_able_characters += str({c:state["characters"][c]})
+    system_prompt = system_prompt_template.invoke({"characters": aside_able_characters, "history": state["history"]})
     state["speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
     return state
     pass
@@ -318,23 +325,22 @@ if pending_writes and any("__interrupt__" in w for w in pending_writes):
         for event in graph.stream(cmd, config, stream_mode="messages"):
             node_name = event[1].get("langgraph_node")
 
-            match node_name:
-                case "리드 생성":
-                    if not event[0].content:
-                        continue
+            if node_name in ["리드 생성", "어사이드 생성"]:
+                if not event[0].content:
+                    continue
 
-                    buffer += event[0].content
+                buffer += event[0].content
 
-                    if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
-                        tag_match = re.search(r"<DIALOGUE([^>]*)>", buffer)
-                        if tag_match:
-                            attrs = tag_match.group(1)
-                            match = re.search(f'speaker="([^"]+)"', attrs)
-                            speaker = match.group(1) if match else "캐릭터"
-                            current_role = f"dialogue:{speaker}"
-                            buffer = buffer.split(">", 1)[-1]
-                            container = message_box.chat_message(speaker)
-                            placeholder = container.empty()
+                if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+                    tag_match = re.search(r"<DIALOGUE([^>]*)>", buffer)
+                    if tag_match:
+                        attrs = tag_match.group(1)
+                        match = re.search(f'speaker="([^"]+)"', attrs)
+                        speaker = match.group(1) if match else "캐릭터"
+                        current_role = f"dialogue:{speaker}"
+                        buffer = buffer.split(">", 1)[-1]
+                        container = message_box.chat_message(speaker)
+                        placeholder = container.empty()
                     if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
                         placeholder.write(f"{speaker}: {buffer}")
                     if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
@@ -343,6 +349,32 @@ if pending_writes and any("__interrupt__" in w for w in pending_writes):
                         buffer = ""
                         current_role = None
                         speaker = None
+
+            # match node_name:
+            #     case "리드 생성":
+            #         if not event[0].content:
+            #             continue
+            #
+            #         buffer += event[0].content
+            #
+            #         if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+            #             tag_match = re.search(r"<DIALOGUE([^>]*)>", buffer)
+            #             if tag_match:
+            #                 attrs = tag_match.group(1)
+            #                 match = re.search(f'speaker="([^"]+)"', attrs)
+            #                 speaker = match.group(1) if match else "캐릭터"
+            #                 current_role = f"dialogue:{speaker}"
+            #                 buffer = buffer.split(">", 1)[-1]
+            #                 container = message_box.chat_message(speaker)
+            #                 placeholder = container.empty()
+            #         if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
+            #             placeholder.write(f"{speaker}: {buffer}")
+            #         if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+            #             buffer = buffer.replace("</DIALOGUE>", "")
+            #             placeholder.write(f"{speaker}: {buffer}")
+            #             buffer = ""
+            #             current_role = None
+            #             speaker = None
 else:
     st.chat_input("대화를 입력하세요.", disabled=True)
     graph.invoke(None, config)
