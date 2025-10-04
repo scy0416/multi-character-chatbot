@@ -227,4 +227,100 @@ graph_builder.add_node("어사이드 욕구 확인", 어사이드_욕구_확인)
 graph_builder.add_node("어사이드 생성", 어사이드_생성)
 
 graph_builder.add_edge(START, "사용자 발화")
-graph_builder.add_edge(START, "")
+graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
+graph_builder.add_conditional_edges("리드 생성", lambda state, _: "어사이드 욕구 확인" if len(state["characters"]) > 1 else "사용자 발화", ["어사이드 욕구 확인", "사용자 발화"])
+graph_builder.add_conditional_edges("어사이드 욕구 확인", 핸드오프_욕구_확인, ["리드 생성", "어사이드 생성", "사용자 발화"])
+graph_builder.add_conditional_edges("어사이드 생성", lambda state, _: "어사이드 욕구 확인" if state["aside_turn"] < 5 else "사용자 발화")
+
+client = MongoClient(st.secrets["mongodb"]["MONGODB_URI"], tls=True)
+saver = MongoDBSaver(
+    client,
+    db_name=st.secrets["mongodb"]["DB_NAME"],
+    checkpoint_collection_name="checkpoints",
+    writes_collection_name="checkpoints_writes"
+)
+
+graph = graph_builder.compile(checkpointer=saver)
+print(graph.get_graph().draw_mermaid())
+
+with st.spinner("불러오는 중..."):
+    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("info").get().to_dict()
+    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("participants").get().to_dict()
+
+config = {"configurable": {"thread_id": st.session_state.chat_id}}
+
+tup = saver.get_tuple(config)
+exists_latest = (tup is not None)
+
+if not exists_latest:
+    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document(
+        "info").get().to_dict()
+    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document(
+        "participants").get().to_dict()
+
+    graph.invoke(State(
+        history=[],
+        characters=chat_participants,
+        lead_speaker="",
+        aside_speaker="",
+        lead_turn=0,
+        aside_turn=0
+    ), config)
+
+config, checkpoint, metadata, parent_config, pending_writes = saver.get_tuple(config)
+
+message_box = st.container(border=True)
+
+for message in checkpoint["channel_values"]["history"]:
+    if isinstance(message, AIMessage):
+        speaker = message.content.split(":")[0]
+        with message_box.chat_message(speaker):
+            st.write(message.content)
+    else:
+        with message_box.chat_message("human"):
+            st.write(message.content)
+
+if pending_writes and any("__interrupt__" in w for w in pending_writes):
+    prompt = st.chat_input("대화를 입력하세요.")
+    if prompt:
+        with message_box:
+            with st.chat_message("user"):
+                st.write(prompt)
+        cmd = Command(resume={"text": prompt})
+
+        buffer = ""
+        current_role = None
+        speaker = None
+        container = None
+        placeholder = None
+        for event in graph.stream(cmd, config, stream_mode="messages"):
+            node_name = event[1].get("langgraph_node")
+
+            if node_name in ["리드 생성", "어사이드 생성"]:
+                if not event[0].content:
+                    continue
+
+                buffer += event[0].content
+
+                if "<DIALOGUE" in buffer and ">" in buffer and current_role is None:
+                    tag_match = re.search(r"<DIALOGUE([^>]*)>", buffer)
+                    if tag_match:
+                        attrs = tag_match.group(1)
+                        match = re.search(f'speaker="([^"]+)"', attrs)
+                        speaker = match.group(1) if match else "캐릭터"
+                        current_role = f"dialogue:{speaker}"
+                        buffer = buffer.split(">", 1)[-1]
+                        container = message_box.chat_message(speaker)
+                        placeholder = container.empty()
+                    if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
+                        placeholder.write(f"{speaker}: {buffer}")
+                    if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+                        buffer = buffer.replace("</DIALOGUE>", "")
+                        placeholder.write(f"{speaker}: {buffer}")
+                        buffer = ""
+                        current_role = None
+                        speaker = None
+else:
+    st.chat_input("대화를 입력하세요.", disabled=True)
+    graph.invoke(None, config)
+    st.rerun()
