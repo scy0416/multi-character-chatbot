@@ -25,14 +25,16 @@ if not "chat_id" in st.session_state or st.session_state.chat_id is None:
 db = get_firestore()
 llm = ChatOpenAI(model="gpt-4.1-2025-04-14", streaming=True)
 
+
 # 상태 그래프의 상태
 class State(TypedDict):
-    history: List       # 대화 기록
-    characters: Dict    # 대화 참여 캐릭터들 정보
-    lead_speaker: str   # 리드 발화자
+    history: List  # 대화 기록
+    characters: Dict  # 대화 참여 캐릭터들 정보
+    lead_speaker: str  # 리드 발화자
     aside_speaker: str  # 어사이드 발화자
-    lead_turn: int      # 리드 턴 수(최대 2턴)
-    aside_turn: int     # 어사이드 턴 수(최대 5턴)
+    lead_turn: int  # 리드 턴 수(최대 2턴)
+    aside_turn: int  # 어사이드 턴 수(최대 5턴)
+
 
 # 사용자의 입력을 인터럽트로 받아서 내화 기록에 추가
 def 사용자_발화(state: State):
@@ -42,9 +44,11 @@ def 사용자_발화(state: State):
     state["lead_turn"] = 0
     return state
 
+
 # 발화자 캐릭터를 담는 클래스
 class utterance_character(BaseModel):
     utterance_character: str = Field(description="가장 발화를 하고자 하는 캐릭터의 이름")
+
 
 # 리드 턴을 진행할 캐릭터 선정하는 노드
 def 리드_욕구_확인(state: State):
@@ -63,6 +67,7 @@ def 리드_욕구_확인(state: State):
     state["aside_speaker"] = ""
     state["aside_turn"] = 0
     return state
+
 
 # 리드 대화를 생성하는 노드
 def 리드_생성(state: State):
@@ -83,7 +88,9 @@ def 리드_생성(state: State):
 {character}""")
     ])
 
-    system_prompt = system_prompt_template.invoke({"current_speaker": state["lead_speaker"], "history": state["history"], "character": str(state["characters"][state["lead_speaker"]])})
+    system_prompt = system_prompt_template.invoke(
+        {"current_speaker": state["lead_speaker"], "history": state["history"],
+         "character": str(state["characters"][state["lead_speaker"]])})
 
     buffer = ""
     current_role = None
@@ -115,6 +122,7 @@ def 리드_생성(state: State):
     state["lead_turn"] += 1
     return state
 
+
 # 어사이드를 하고자 하는 캐릭터를 정하는 노드
 def 어사이드_욕구_확인(state: State):
     system_prompt_template = ChatPromptTemplate.from_messages([
@@ -136,6 +144,7 @@ def 어사이드_욕구_확인(state: State):
     state["aside_speaker"] = llm.with_structured_output(utterance_character).invoke(system_prompt).utterance_character
     return state
 
+
 # 어사이드를 생성하는 노드
 def 어사이드_생성(state: State):
     system_prompt_template = ChatPromptTemplate.from_messages([
@@ -143,7 +152,7 @@ def 어사이드_생성(state: State):
         당신에게는 지금까지의 대화 내역과 발화를 하고자 하는 캐릭터의 정보가 전달됩니다.
 
         아래의 형식으로 출력하세요. 단, 캐릭터의 대화 스타일에 따라서 최대 5회까지 나눠서 발언할 수 있습니다.
-        
+
         어사이드는 진행되고 있는 대화 주제에 대답하는 답변을 만들어내세요.
 
         <DIALOGUE speaker="{current_speaker}">
@@ -195,10 +204,11 @@ def 어사이드_생성(state: State):
     state["aside_turn"] += 1
     return state
 
+
 class Handoff(BaseModel):
     handoff: bool = Field(description="어사이드를 진행한 캐릭터의 핸드오프를 하고자 하는 의지")
 
-def 핸드오프_욕구_확인(state: State, runtime):
+def 핸드오프_욕구_확인(state: State):
     if state["aside_speaker"] == "":
         return "사용자 발화"
 
@@ -214,9 +224,13 @@ def 핸드오프_욕구_확인(state: State, runtime):
 
     system_prompt = system_prompt_template.invoke({"character": state["aside_speaker"], "history": state["history"]})
     if state["lead_turn"] < 2 and llm.with_structured_output(Handoff).invoke(system_prompt).handoff:
-        return "리드 생성"
+        return "핸드오프 중간처리"
     else:
         return "어사이드 생성"
+
+def 핸드오프_처리(state:State):
+    state["lead_speaker"] = state["aside_speaker"]
+    return state
 
 graph_builder = StateGraph(State)
 
@@ -225,12 +239,17 @@ graph_builder.add_node("리드 욕구 확인", 리드_욕구_확인)
 graph_builder.add_node("리드 생성", 리드_생성)
 graph_builder.add_node("어사이드 욕구 확인", 어사이드_욕구_확인)
 graph_builder.add_node("어사이드 생성", 어사이드_생성)
+graph_builder.add_node("핸드오프 중간처리", 핸드오프_처리)
 
 graph_builder.add_edge(START, "사용자 발화")
 graph_builder.add_edge("사용자 발화", "리드 욕구 확인")
-graph_builder.add_conditional_edges("리드 생성", lambda state, _: "어사이드 욕구 확인" if len(state["characters"]) > 1 else "사용자 발화", ["어사이드 욕구 확인", "사용자 발화"])
-graph_builder.add_conditional_edges("어사이드 욕구 확인", 핸드오프_욕구_확인, ["리드 생성", "어사이드 생성", "사용자 발화"])
-graph_builder.add_conditional_edges("어사이드 생성", lambda state, _: "어사이드 욕구 확인" if state["aside_turn"] < 5 else "사용자 발화")
+graph_builder.add_edge("리드 욕구 확인", "리드 생성")
+graph_builder.add_conditional_edges("리드 생성", lambda state: "어사이드 욕구 확인" if len(state["characters"]) > 1 else "사용자 발화",
+                                    ["어사이드 욕구 확인", "사용자 발화"])
+graph_builder.add_conditional_edges("어사이드 욕구 확인", 핸드오프_욕구_확인, ["핸드오프 중간처리", "어사이드 생성", "사용자 발화"])
+graph_builder.add_conditional_edges("어사이드 생성", lambda state: "어사이드 욕구 확인" if state["aside_turn"] < 5 else "사용자 발화",
+                                    ["어사이드 욕구 확인", "사용자 발화"])
+graph_builder.add_edge("핸드오프 중간처리", "리드 생성")
 
 client = MongoClient(st.secrets["mongodb"]["MONGODB_URI"], tls=True)
 saver = MongoDBSaver(
@@ -244,8 +263,10 @@ graph = graph_builder.compile(checkpointer=saver)
 print(graph.get_graph().draw_mermaid())
 
 with st.spinner("불러오는 중..."):
-    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("info").get().to_dict()
-    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document("participants").get().to_dict()
+    chat_info = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document(
+        "info").get().to_dict()
+    chat_participants = db.collection("chats").document(st.user.sub).collection(st.session_state.chat_id).document(
+        "participants").get().to_dict()
 
 config = {"configurable": {"thread_id": st.session_state.chat_id}}
 
@@ -312,14 +333,14 @@ if pending_writes and any("__interrupt__" in w for w in pending_writes):
                         buffer = buffer.split(">", 1)[-1]
                         container = message_box.chat_message(speaker)
                         placeholder = container.empty()
-                    if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
-                        placeholder.write(f"{speaker}: {buffer}")
-                    if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
-                        buffer = buffer.replace("</DIALOGUE>", "")
-                        placeholder.write(f"{speaker}: {buffer}")
-                        buffer = ""
-                        current_role = None
-                        speaker = None
+                if current_role and not any(tag in buffer for tag in ["</DIALOGUE>"]):
+                    placeholder.write(f"{speaker}: {buffer}")
+                if current_role and current_role.startswith("dialogue") and "</DIALOGUE>" in buffer:
+                    buffer = buffer.replace("</DIALOGUE>", "")
+                    placeholder.write(f"{speaker}: {buffer}")
+                    buffer = ""
+                    current_role = None
+                    speaker = None
 else:
     st.chat_input("대화를 입력하세요.", disabled=True)
     graph.invoke(None, config)
