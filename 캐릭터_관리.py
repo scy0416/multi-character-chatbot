@@ -9,8 +9,8 @@ with col1:
     if st.button("타이틀 페이지로 가기"):
         st.switch_page("타이틀.py")
 with col3:
-    if st.button("채팅 관리 페이지로 가기"):
-        st.switch_page("채팅_관리.py")
+    if st.button("채팅 페이지로 가기"):
+        st.switch_page("채팅.py")
 
 db = get_firestore()
 

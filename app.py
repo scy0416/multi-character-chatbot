@@ -12,5 +12,6 @@ def get_firestore():
 
     return firestore.client()
 
-pg = st.navigation(["타이틀.py", "캐릭터_관리.py", "채팅_관리.py", "챗봇.py"], position="top")
+#pg = st.navigation(["타이틀.py", "캐릭터_관리.py", "채팅_관리.py", "챗봇.py", "채팅.py"], position="top")
+pg = st.navigation(["타이틀.py", "캐릭터_관리.py", "채팅.py"], position="top")
 pg.run()
